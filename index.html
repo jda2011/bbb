@@ -42,7 +42,7 @@
         </div>
         <div>
           <h1 class="font-bold text-lg leading-tight">Upbit BTC Live Monitor</h1>
-          <p class="text-xs text-slate-400">일봉 / 주봉 / 월봉 실시간 차트</p>
+          <p class="text-xs text-slate-400">시가·정가(종가) 실시간 추이 차트</p>
         </div>
       </div>
       <div class="flex items-center gap-3">
@@ -102,8 +102,8 @@
     <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
         <div>
-          <h2 class="text-base font-semibold text-slate-200">실시간 추이 차트 & 이동평균선</h2>
-          <p class="text-xs text-slate-400">붉은 막대(상승), 푸른 막대(하락), 녹색 선(MA5)</p>
+          <h2 class="text-base font-semibold text-slate-200">실시간 추이 차트 (시가·정가 막대)</h2>
+          <p class="text-xs text-slate-400">상승시 붉은 막대(위로), 하락시 푸른 막대(아래로), 녹색 선(MA5)</p>
         </div>
         
         <!-- 주기 선택 버튼 (일봉 / 주봉 / 월봉) -->
@@ -189,12 +189,10 @@
     const maxLogRows = 15;
     const maPeriod = 5;
 
-    // 웹소켓 상태 관리 변수
     let ws = null;
     let pingInterval = null;
-    let reconnectDelay = 1000; // 재연결 대기 시간 (초기 1초)
+    let reconnectDelay = 1000;
 
-    // 차트 데이터 배열
     let chartLabels = [];
     let barValues = [];
     let barColors = [];
@@ -209,7 +207,7 @@
         labels: chartLabels,
         datasets: [
           {
-            label: '변동 추이',
+            label: '시가-정가 변동',
             data: barValues,
             backgroundColor: barColors,
             borderRadius: 2,
@@ -274,8 +272,8 @@
           let label = c.candle_date_time_kst.split('T')[0];
           if (period === 'days') label = label.substring(5);
           
-          const open = c.opening_price;
-          const close = c.trade_price;
+          const open = c.opening_price;   // 시가
+          const close = c.trade_price;  // 종가 (정가)
           const isUp = close >= open;
 
           chartLabels.push(label);
@@ -367,7 +365,6 @@
       updateCalculator();
     }
 
-    // 보강된 업비트 웹소켓 연결 함수
     function connectUpbitWS() {
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
         return;
@@ -376,7 +373,6 @@
       ws = new WebSocket('wss://api.upbit.com/websocket/v1');
 
       ws.onopen = () => {
-        // 성공 연결 시 재연결 대기 시간 초기화
         reconnectDelay = 1000;
 
         document.getElementById('connection-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 웹소켓 연결됨';
@@ -389,7 +385,6 @@
         ];
         ws.send(JSON.stringify(payload));
 
-        // 30초마다 PING 타이머 작동 (연결 유지 Heartbeat)
         if (pingInterval) clearInterval(pingInterval);
         pingInterval = setInterval(() => {
           if (ws && ws.readyState === WebSocket.OPEN) {
@@ -403,7 +398,7 @@
         if (event.data instanceof Blob) {
           textData = await event.data.text();
         }
-        if (textData === 'PONG') return; // PONG 수신 시 무시
+        if (textData === 'PONG') return;
 
         const data = JSON.parse(textData);
 
@@ -419,6 +414,7 @@
 
           document.getElementById('last-update').textContent = `최근 체결: ${timeStr}`;
 
+          // 실시간 현재 캔들의 종가(정가) 및 막대 업데이트
           if (closePrices.length > 0) {
             const lastIdx = closePrices.length - 1;
             const openPrice = Array.isArray(barValues[lastIdx]) ? barValues[lastIdx][0] : closePrices[lastIdx];
@@ -442,7 +438,6 @@
         document.getElementById('connection-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> 연결 끊김 (재연결 시도 중)';
         document.getElementById('connection-status').className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20';
 
-        // 지수 백오프 기반 재연결 시도 (최대 10초)
         setTimeout(() => {
           connectUpbitWS();
         }, reconnectDelay);
@@ -456,7 +451,6 @@
       };
     }
 
-    // 브라우저 탭 활성화 시 연결 상태 체크 및 자동 복구
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
