@@ -42,7 +42,7 @@
         </div>
         <div>
           <h1 class="font-bold text-lg leading-tight">Upbit BTC Live Monitor</h1>
-          <p class="text-xs text-slate-400">시가·정가(종가) 실시간 추이 차트</p>
+          <p class="text-xs text-slate-400">일봉 / 주봉 / 월봉 실시간 차트</p>
         </div>
       </div>
       <div class="flex items-center gap-3">
@@ -102,20 +102,20 @@
     <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
         <div>
-          <h2 class="text-base font-semibold text-slate-200">실시간 추이 차트 (시가·정가 막대)</h2>
+          <h2 class="text-base font-semibold text-slate-200">실시간 추이 차트 (<span id="chart-title">일봉</span>)</h2>
           <p class="text-xs text-slate-400">상승시 붉은 막대(위로), 하락시 푸른 막대(아래로), 녹색 선(MA5)</p>
         </div>
         
         <!-- 주기 선택 버튼 (일봉 / 주봉 / 월봉) -->
         <div class="flex items-center gap-2 bg-slate-900/80 p-1 rounded-xl border border-slate-700/60">
           <button id="btn-days" onclick="changePeriod('days')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-slate-950 transition-colors">
-            일봉 (하루)
+            일봉 (1일)
           </button>
           <button id="btn-weeks" onclick="changePeriod('weeks')" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors">
-            주봉 (일주일)
+            주봉 (1주)
           </button>
           <button id="btn-months" onclick="changePeriod('months')" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors">
-            월봉 (한 달)
+            월봉 (1달)
           </button>
         </div>
       </div>
@@ -232,7 +232,7 @@
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
-          x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B', maxTicksLimit: 10 } },
+          x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B', maxTicksLimit: 12 } },
           y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B' } }
         }
       }
@@ -254,9 +254,30 @@
       priceChart.data.datasets[1].data = maData;
     }
 
+    // 주기에 따른 날짜 라벨 변환 로직
+    function formatCandleLabel(dateStr, period) {
+      const date = new Date(dateStr);
+      if (period === 'days') {
+        // 일봉: MM-DD
+        return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      } else if (period === 'weeks') {
+        // 주봉: YY-W주차
+        const year = String(date.getFullYear()).slice(-2);
+        const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
+        const pastDaysOfYear = (date - firstDayOfYear) / 86400000;
+        const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+        return `${year}-W${weekNum}`;
+      } else if (period === 'months') {
+        // 월봉: YYYY-MM
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      }
+      return dateStr;
+    }
+
+    // 업비트 API를 통해 일/주/월봉 데이터 로드
     async function loadCandleData(period) {
       try {
-        const count = 30;
+        const count = period === 'months' ? 24 : 30; // 월봉은 24개월, 일/주봉은 30개
         const url = `https://api.upbit.com/v1/candles/${period}?market=KRW-BTC&count=${count}`;
         const res = await fetch(url);
         const data = await res.json();
@@ -269,9 +290,7 @@
         closePrices = [];
 
         sorted.forEach(c => {
-          let label = c.candle_date_time_kst.split('T')[0];
-          if (period === 'days') label = label.substring(5);
-          
+          const label = formatCandleLabel(c.candle_date_time_kst, period);
           const open = c.opening_price;   // 시가
           const close = c.trade_price;  // 종가 (정가)
           const isUp = close >= open;
@@ -293,12 +312,14 @@
       }
     }
 
+    // 주기 클릭 시 상태 변경
     function changePeriod(period) {
       currentPeriod = period;
 
       const btnDays = document.getElementById('btn-days');
       const btnWeeks = document.getElementById('btn-weeks');
       const btnMonths = document.getElementById('btn-months');
+      const titleEl = document.getElementById('chart-title');
 
       const activeClass = "px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-slate-950 transition-colors";
       const inactiveClass = "px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors";
@@ -306,6 +327,8 @@
       btnDays.className = period === 'days' ? activeClass : inactiveClass;
       btnWeeks.className = period === 'weeks' ? activeClass : inactiveClass;
       btnMonths.className = period === 'months' ? activeClass : inactiveClass;
+
+      titleEl.textContent = period === 'days' ? '일봉 (1일 기준)' : period === 'weeks' ? '주봉 (1주 기준)' : '월봉 (1달 기준)';
 
       loadCandleData(period);
     }
@@ -414,7 +437,7 @@
 
           document.getElementById('last-update').textContent = `최근 체결: ${timeStr}`;
 
-          // 실시간 현재 캔들의 종가(정가) 및 막대 업데이트
+          // 실시간 현재 봉 종가 갱신
           if (closePrices.length > 0) {
             const lastIdx = closePrices.length - 1;
             const openPrice = Array.isArray(barValues[lastIdx]) ? barValues[lastIdx][0] : closePrices[lastIdx];
@@ -494,7 +517,7 @@
     }
     calcBtcInput.addEventListener('input', updateCalculator);
 
-    // 초기 실행
+    // 초기 구동
     fetchInitialTicker();
     loadCandleData('days');
     connectUpbitWS();
