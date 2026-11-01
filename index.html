@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>업비트 실시간 비트코인 체결 모니터</title>
+  <title>업비트 실시간 비트코인 체결 & 고가/저가 모니터</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Chart.js CDN -->
@@ -12,7 +12,6 @@
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap');
     body { font-family: 'Pretendard', sans-serif; }
     
-    /* 체결 행 실시간 등장 애니메이션 */
     @keyframes newRowBuy {
       0% { background-color: rgba(239, 68, 68, 0.25); }
       100% { background-color: transparent; }
@@ -24,7 +23,6 @@
     .row-buy { animation: newRowBuy 0.8s ease-out; }
     .row-sell { animation: newRowSell 0.8s ease-out; }
 
-    /* 가격 변동 반짝임 효과 */
     .price-up { color: #EF4444; animation: flashRed 0.5s ease-out; }
     .price-down { color: #3B82F6; animation: flashBlue 0.5s ease-out; }
     @keyframes flashRed { 0% { background-color: rgba(239, 68, 68, 0.2); } 100% { background-color: transparent; } }
@@ -41,12 +39,12 @@
         </div>
         <div>
           <h1 class="font-bold text-lg leading-tight">Upbit BTC Live Monitor</h1>
-          <p class="text-xs text-slate-400">실시간 체결 내역 & 시세 추이</p>
+          <p class="text-xs text-slate-400">실시간 고가/저가 & 체결 모니터링</p>
         </div>
       </div>
       <div class="flex items-center gap-3">
         <span id="connection-status" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 웹소켓 수신 중
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 웹소켓 연결됨
         </span>
       </div>
     </div>
@@ -54,7 +52,7 @@
 
   <!-- Main Content -->
   <main class="max-w-6xl mx-auto px-4 py-6 space-y-6">
-    <!-- Top Price Overview -->
+    <!-- Top Price & High/Low Overview -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
       <!-- Main Price Card -->
       <div class="md:col-span-2 bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5 flex flex-col justify-between">
@@ -71,29 +69,34 @@
         </div>
       </div>
 
-      <!-- High / Low -->
-      <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5 flex flex-col justify-between">
-        <span class="text-xs text-slate-400 font-medium">당일 고가 / 저가</span>
-        <div class="space-y-2 mt-2">
-          <div>
-            <div class="text-xs text-slate-400">고가</div>
-            <div id="btc-high" class="text-lg font-bold text-red-400">₩0</div>
+      <!-- High / Low Card & Range Bar -->
+      <div class="md:col-span-2 bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5 flex flex-col justify-between">
+        <div class="flex justify-between items-center">
+          <span class="text-xs text-slate-400 font-medium">당일 고가 / 저가 현황</span>
+          <span id="price-range-percent" class="text-xs font-mono text-amber-400 font-medium">위치: 0%</span>
+        </div>
+        
+        <div class="grid grid-cols-2 gap-4 my-2">
+          <div class="bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+            <div class="text-xs text-red-400 font-medium">당일 고가 (High)</div>
+            <div id="btc-high" class="text-xl font-bold text-red-400 mt-1">₩0</div>
           </div>
-          <div>
-            <div class="text-xs text-slate-400">저가</div>
-            <div id="btc-low" class="text-lg font-bold text-blue-400">₩0</div>
+          <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
+            <div class="text-xs text-blue-400 font-medium">당일 저가 (Low)</div>
+            <div id="btc-low" class="text-xl font-bold text-blue-400 mt-1">₩0</div>
           </div>
         </div>
-      </div>
 
-      <!-- Volume -->
-      <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5 flex flex-col justify-between">
-        <span class="text-xs text-slate-400 font-medium">24시간 누적 거래량</span>
-        <div class="mt-2">
-          <div id="btc-volume" class="text-xl font-bold text-slate-100">0 BTC</div>
-          <div id="btc-acc-price" class="text-xs text-slate-400 mt-1">≈ ₩0</div>
+        <!-- High/Low Visual Progress Bar -->
+        <div class="space-y-1">
+          <div class="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden flex relative border border-slate-700/50">
+            <div id="range-bar" class="bg-gradient-to-r from-blue-500 via-amber-500 to-red-500 h-full transition-all duration-300" style="width: 0%"></div>
+          </div>
+          <div class="flex justify-between text-[10px] text-slate-500 font-mono">
+            <span>저가 (0%)</span>
+            <span>고가 (100%)</span>
+          </div>
         </div>
-        <div class="text-xs text-slate-500 mt-4">API: Upbit Public WebSocket</div>
       </div>
     </div>
 
@@ -102,7 +105,11 @@
       <div class="flex justify-between items-center mb-4">
         <div>
           <h2 class="text-base font-semibold text-slate-200">실시간 체결가 추이 차트</h2>
-          <p class="text-xs text-slate-400">체결 발생시 실시간 업데이트</p>
+          <p class="text-xs text-slate-400">실시간 틱 데이터 스트림</p>
+        </div>
+        <div class="flex gap-4 text-xs font-mono">
+          <span class="text-red-400">● 고가: <strong id="chart-high-val">₩0</strong></span>
+          <span class="text-blue-400">● 저가: <strong id="chart-low-val">₩0</strong></span>
         </div>
       </div>
       <div class="h-64 w-full">
@@ -112,11 +119,11 @@
 
     <!-- Live Trade Log Table & Calculator -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <!-- Trade Log Table (핵심 기능) -->
+      <!-- Trade Log Table -->
       <div class="lg:col-span-2 bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
         <div class="flex justify-between items-center mb-3">
           <h3 class="text-sm font-semibold text-slate-200">실시간 체결 내역 표</h3>
-          <span class="text-xs text-slate-400">최신 15건 자동 표시</span>
+          <span class="text-xs text-slate-400">최신 15건 실시간 자동 갱신</span>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-xs">
@@ -130,23 +137,33 @@
               </tr>
             </thead>
             <tbody id="trade-log" class="divide-y divide-slate-800/60">
-              <!-- 실시간 체결 데이터 행이 여기에 자동으로 삽입됩니다 -->
+              <!-- 실시간 체결 행이 들어오는 위치 -->
             </tbody>
           </table>
         </div>
       </div>
 
-      <!-- Converter -->
-      <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
-        <h3 class="text-sm font-semibold text-slate-200 mb-3">비트코인 실시간 계산기</h3>
-        <div class="space-y-4">
-          <div>
-            <label class="block text-xs text-slate-400 mb-1">비트코인 수량 (BTC)</label>
-            <input type="number" id="calc-btc" value="1" step="0.01" min="0" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500">
+      <!-- Volume & Calculator -->
+      <div class="space-y-4">
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
+          <span class="text-xs text-slate-400 font-medium">24시간 누적 거래량</span>
+          <div class="mt-2">
+            <div id="btc-volume" class="text-xl font-bold text-slate-100">0 BTC</div>
+            <div id="btc-acc-price" class="text-xs text-slate-400 mt-1">≈ ₩0</div>
           </div>
-          <div class="p-3 bg-slate-900/50 rounded-lg text-xs flex justify-between items-center">
-            <span class="text-slate-400">원화(KRW) 평가액:</span>
-            <span id="calc-krw" class="font-bold text-amber-400 text-sm">₩0</span>
+        </div>
+
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
+          <h3 class="text-sm font-semibold text-slate-200 mb-3">비트코인 실시간 계산기</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">비트코인 수량 (BTC)</label>
+              <input type="number" id="calc-btc" value="1" step="0.01" min="0" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500">
+            </div>
+            <div class="p-3 bg-slate-900/50 rounded-lg text-xs flex justify-between items-center">
+              <span class="text-slate-400">원화(KRW) 평가액:</span>
+              <span id="calc-krw" class="font-bold text-amber-400 text-sm">₩0</span>
+            </div>
           </div>
         </div>
       </div>
@@ -154,13 +171,15 @@
   </main>
 
   <footer class="text-center py-6 border-t border-slate-800 text-xs text-slate-500">
-    Powered by Upbit OpenAPI
+    Powered by Upbit Open API
   </footer>
 
   <script>
     let currentKrwPrice = 0;
+    let highPrice = 0;
+    let lowPrice = 0;
     const maxDataPoints = 40;
-    const maxLogRows = 15; // 표시할 최대 체결 행 수
+    const maxLogRows = 15;
 
     // Chart.js 설정
     const ctx = document.getElementById('priceChart').getContext('2d');
@@ -194,7 +213,7 @@
       }
     });
 
-    // REST API로 초기 상단 데이터 수신
+    // REST API 초기 데이터 로드
     async function fetchInitialTicker() {
       try {
         const res = await fetch('https://api.upbit.com/v1/ticker?markets=KRW-BTC');
@@ -209,6 +228,9 @@
 
     function updateTickerUI(data) {
       const price = data.trade_price;
+      highPrice = data.high_price;
+      lowPrice = data.low_price;
+      
       const changeRate = (data.signed_change_rate * 100).toFixed(2);
       const changePrice = data.signed_change_price;
 
@@ -232,15 +254,27 @@
       }`;
 
       document.getElementById('btc-change-price').textContent = (isPlus ? '+' : '') + '₩' + changePrice.toLocaleString();
-      document.getElementById('btc-high').textContent = '₩' + data.high_price.toLocaleString();
-      document.getElementById('btc-low').textContent = '₩' + data.low_price.toLocaleString();
+      
+      // 고가 / 저가 UI 업데이트
+      document.getElementById('btc-high').textContent = '₩' + highPrice.toLocaleString();
+      document.getElementById('btc-low').textContent = '₩' + lowPrice.toLocaleString();
+      document.getElementById('chart-high-val').textContent = '₩' + highPrice.toLocaleString();
+      document.getElementById('chart-low-val').textContent = '₩' + lowPrice.toLocaleString();
+
+      // 고가/저가 게이지 바 계산
+      if (highPrice > lowPrice) {
+        const rangePercent = Math.min(Math.max(((price - lowPrice) / (highPrice - lowPrice)) * 100, 0), 100);
+        document.getElementById('range-bar').style.width = rangePercent.toFixed(1) + '%';
+        document.getElementById('price-range-percent').textContent = `현재 위치: ${rangePercent.toFixed(1)}%`;
+      }
+
       document.getElementById('btc-volume').textContent = data.acc_trade_volume_24h.toFixed(2) + ' BTC';
       document.getElementById('btc-acc-price').textContent = '≈ ₩' + Math.round(data.acc_trade_price_24h).toLocaleString();
 
       updateCalculator();
     }
 
-    // 업비트 웹소켓 연결 (실시간 체결 수신)
+    // 업비트 웹소켓 연결
     function connectUpbitWS() {
       const ws = new WebSocket('wss://api.upbit.com/websocket/v1');
 
@@ -264,16 +298,15 @@
           updateTickerUI(data);
         }
 
-        // 실시간 체결 수신 시 표 및 차트 업데이트
         if (data.type === 'trade') {
           const price = data.trade_price;
           const qty = data.trade_volume;
-          const isAsk = data.ask_bid === 'ASK'; // ASK: 매도, BID: 매수
+          const isAsk = data.ask_bid === 'ASK';
           const timeStr = data.trade_time_str || new Date().toLocaleTimeString();
 
           document.getElementById('last-update').textContent = `최근 체결: ${timeStr}`;
 
-          // 1. 차트 갱신
+          // 차트 업데이트
           const labels = priceChart.data.labels;
           const dataPoints = priceChart.data.datasets[0].data;
 
@@ -286,7 +319,7 @@
           }
           priceChart.update('none');
 
-          // 2. 실시간 체결 표 갱신
+          // 실시간 체결 내역 행 추가
           addTradeLogRow(timeStr, price, qty, isAsk);
         }
       };
@@ -298,13 +331,11 @@
       };
     }
 
-    // 실시간 체결 행 생성 함수
     function addTradeLogRow(time, price, qty, isAsk) {
       const tbody = document.getElementById('trade-log');
       const row = document.createElement('tr');
       const totalAmount = Math.round(price * qty);
 
-      // 매수/매도 구분 CSS 및 애니메이션 클래스 지정
       row.className = `transition-colors ${isAsk ? 'row-sell' : 'row-buy'}`;
 
       row.innerHTML = `
@@ -319,16 +350,13 @@
         </td>
       `;
 
-      // 최신 체결건을 가장 위에 삽입
       tbody.insertBefore(row, tbody.firstChild);
 
-      // 설정한 최대 개수를 초과하면 이전 행 제거
       if (tbody.children.length > maxLogRows) {
         tbody.removeChild(tbody.lastChild);
       }
     }
 
-    // 계산기 연동
     const calcBtcInput = document.getElementById('calc-btc');
     function updateCalculator() {
       const btcVal = parseFloat(calcBtcInput.value) || 0;
@@ -337,7 +365,6 @@
     }
     calcBtcInput.addEventListener('input', updateCalculator);
 
-    // 실행
     fetchInitialTicker();
     connectUpbitWS();
   </script>
