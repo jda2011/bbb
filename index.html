@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>업비트 실시간 비트코인 모니터</title>
+  <title>업비트 실시간 비트코인 체결 모니터</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Chart.js CDN -->
@@ -11,10 +11,24 @@
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap');
     body { font-family: 'Pretendard', sans-serif; }
-    .price-up { color: #C84A31; animation: flashRed 0.5s ease-out; }
-    .price-down { color: #1261C4; animation: flashBlue 0.5s ease-out; }
-    @keyframes flashRed { 0% { background-color: rgba(200, 74, 49, 0.2); } 100% { background-color: transparent; } }
-    @keyframes flashBlue { 0% { background-color: rgba(18, 97, 196, 0.2); } 100% { background-color: transparent; } }
+    
+    /* 체결 행 실시간 등장 애니메이션 */
+    @keyframes newRowBuy {
+      0% { background-color: rgba(239, 68, 68, 0.25); }
+      100% { background-color: transparent; }
+    }
+    @keyframes newRowSell {
+      0% { background-color: rgba(59, 130, 246, 0.25); }
+      100% { background-color: transparent; }
+    }
+    .row-buy { animation: newRowBuy 0.8s ease-out; }
+    .row-sell { animation: newRowSell 0.8s ease-out; }
+
+    /* 가격 변동 반짝임 효과 */
+    .price-up { color: #EF4444; animation: flashRed 0.5s ease-out; }
+    .price-down { color: #3B82F6; animation: flashBlue 0.5s ease-out; }
+    @keyframes flashRed { 0% { background-color: rgba(239, 68, 68, 0.2); } 100% { background-color: transparent; } }
+    @keyframes flashBlue { 0% { background-color: rgba(59, 130, 246, 0.2); } 100% { background-color: transparent; } }
   </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen">
@@ -27,12 +41,14 @@
         </div>
         <div>
           <h1 class="font-bold text-lg leading-tight">Upbit BTC Live Monitor</h1>
-          <p class="text-xs text-slate-400">업비트 Open API (Quotation) 연동</p>
+          <p class="text-xs text-slate-400">실시간 체결 내역 & 시세 추이</p>
         </div>
       </div>
-      <span id="connection-status" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> WebSocket 연결됨
-      </span>
+      <div class="flex items-center gap-3">
+        <span id="connection-status" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 웹소켓 수신 중
+        </span>
+      </div>
     </div>
   </header>
 
@@ -50,7 +66,7 @@
           </div>
         </div>
         <div class="mt-4 pt-3 border-t border-slate-700/40 flex justify-between text-xs text-slate-400">
-          <span>전일 대비 변동액: <strong id="btc-change-price" class="text-slate-200">₩0</strong></span>
+          <span>전일 대비: <strong id="btc-change-price" class="text-slate-200">₩0</strong></span>
           <span id="last-update">최근 체결: -</span>
         </div>
       </div>
@@ -77,7 +93,7 @@
           <div id="btc-volume" class="text-xl font-bold text-slate-100">0 BTC</div>
           <div id="btc-acc-price" class="text-xs text-slate-400 mt-1">≈ ₩0</div>
         </div>
-        <div class="text-xs text-slate-500 mt-4">API: Upbit Public Quotation</div>
+        <div class="text-xs text-slate-500 mt-4">API: Upbit Public WebSocket</div>
       </div>
     </div>
 
@@ -85,32 +101,36 @@
     <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
       <div class="flex justify-between items-center mb-4">
         <div>
-          <h2 class="text-base font-semibold text-slate-200">실시간 체결가 추이</h2>
-          <p class="text-xs text-slate-400">업비트 실시간 체결 스트림(Tick Chart)</p>
+          <h2 class="text-base font-semibold text-slate-200">실시간 체결가 추이 차트</h2>
+          <p class="text-xs text-slate-400">체결 발생시 실시간 업데이트</p>
         </div>
       </div>
-      <div class="h-72 w-full">
+      <div class="h-64 w-full">
         <canvas id="priceChart"></canvas>
       </div>
     </div>
 
-    <!-- Trade History / Converter -->
+    <!-- Live Trade Log Table & Calculator -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <!-- Trade Log -->
+      <!-- Trade Log Table (핵심 기능) -->
       <div class="lg:col-span-2 bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
-        <h3 class="text-sm font-semibold text-slate-200 mb-3">최근 실시간 체결 내역</h3>
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-sm font-semibold text-slate-200">실시간 체결 내역 표</h3>
+          <span class="text-xs text-slate-400">최신 15건 자동 표시</span>
+        </div>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-xs">
             <thead class="text-slate-400 border-b border-slate-700/60">
               <tr>
-                <th class="pb-2">체결시간</th>
+                <th class="pb-2 pl-2">체결시간</th>
                 <th class="pb-2">체결가 (KRW)</th>
                 <th class="pb-2">체결량 (BTC)</th>
-                <th class="pb-2 text-right">구분</th>
+                <th class="pb-2">체결금액 (KRW)</th>
+                <th class="pb-2 pr-2 text-right">구분</th>
               </tr>
             </thead>
-            <tbody id="trade-log" class="divide-y divide-slate-800">
-              <!-- Realtime rows -->
+            <tbody id="trade-log" class="divide-y divide-slate-800/60">
+              <!-- 실시간 체결 데이터 행이 여기에 자동으로 삽입됩니다 -->
             </tbody>
           </table>
         </div>
@@ -134,19 +154,19 @@
   </main>
 
   <footer class="text-center py-6 border-t border-slate-800 text-xs text-slate-500">
-    Powered by Upbit OpenAPI (Quotation API & WebSocket)
+    Powered by Upbit OpenAPI
   </footer>
 
   <script>
     let currentKrwPrice = 0;
-    const maxDataPoints = 30;
-    const maxLogRows = 8;
+    const maxDataPoints = 40;
+    const maxLogRows = 15; // 표시할 최대 체결 행 수
 
     // Chart.js 설정
     const ctx = document.getElementById('priceChart').getContext('2d');
-    const chartGradient = ctx.createLinearGradient(0, 0, 0, 300);
-    chartGradient.addColorStop(0, 'rgba(200, 74, 49, 0.2)');
-    chartGradient.addColorStop(1, 'rgba(200, 74, 49, 0)');
+    const chartGradient = ctx.createLinearGradient(0, 0, 0, 250);
+    chartGradient.addColorStop(0, 'rgba(239, 68, 68, 0.2)');
+    chartGradient.addColorStop(1, 'rgba(239, 68, 68, 0)');
 
     const priceChart = new Chart(ctx, {
       type: 'line',
@@ -155,11 +175,11 @@
         datasets: [{
           label: 'BTC/KRW',
           data: [],
-          borderColor: '#C84A31',
+          borderColor: '#EF4444',
           borderWidth: 2,
           backgroundColor: chartGradient,
           fill: true,
-          tension: 0.2,
+          tension: 0.15,
           pointRadius: 0
         }]
       },
@@ -168,13 +188,13 @@
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
-          x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B', maxTicksLimit: 6 } },
+          x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B', maxTicksLimit: 8 } },
           y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B' } }
         }
       }
     });
 
-    // 1. 업비트 REST API (Quotation - Ticker) 호출로 초기 데이터 스냅샷 로드
+    // REST API로 초기 상단 데이터 수신
     async function fetchInitialTicker() {
       try {
         const res = await fetch('https://api.upbit.com/v1/ticker?markets=KRW-BTC');
@@ -183,11 +203,10 @@
           updateTickerUI(data[0]);
         }
       } catch(e) {
-        console.error('REST API 초기 데이터 로드 실패:', e);
+        console.error('초기 로드 실패:', e);
       }
     }
 
-    // 국내 거래소 표준 컬러(상승: 빨간색, 하락: 파란색) 반영 UI 업데이트
     function updateTickerUI(data) {
       const price = data.trade_price;
       const changeRate = (data.signed_change_rate * 100).toFixed(2);
@@ -221,12 +240,11 @@
       updateCalculator();
     }
 
-    // 2. 업비트 WebSocket API 연결로 실시간 시세 및 체결 내역 스트리밍 수신
+    // 업비트 웹소켓 연결 (실시간 체결 수신)
     function connectUpbitWS() {
       const ws = new WebSocket('wss://api.upbit.com/websocket/v1');
 
       ws.onopen = () => {
-        // 업비트 문서 규격에 따른 WebSocket 구독 패킷 전송
         const payload = [
           { ticket: "BTC_MONITOR" },
           { type: "ticker", codes: ["KRW-BTC"] },
@@ -242,12 +260,11 @@
         }
         const data = JSON.parse(textData);
 
-        // 실시간 현재가 수신 시
         if (data.type === 'ticker') {
           updateTickerUI(data);
         }
 
-        // 실시간 체결 수신 시
+        // 실시간 체결 수신 시 표 및 차트 업데이트
         if (data.type === 'trade') {
           const price = data.trade_price;
           const qty = data.trade_volume;
@@ -256,7 +273,7 @@
 
           document.getElementById('last-update').textContent = `최근 체결: ${timeStr}`;
 
-          // 실시간 차트 업데이트
+          // 1. 차트 갱신
           const labels = priceChart.data.labels;
           const dataPoints = priceChart.data.datasets[0].data;
 
@@ -269,35 +286,49 @@
           }
           priceChart.update('none');
 
-          // 최근 체결 로그 테이블 추가
-          addTradeLog(timeStr, price, qty, isAsk);
+          // 2. 실시간 체결 표 갱신
+          addTradeLogRow(timeStr, price, qty, isAsk);
         }
       };
 
       ws.onclose = () => {
-        document.getElementById('connection-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> 연결 끊김 (재연결 중)';
+        document.getElementById('connection-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> 연결 끊김';
         document.getElementById('connection-status').className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20';
         setTimeout(connectUpbitWS, 3000);
       };
     }
 
-    function addTradeLog(time, price, qty, isAsk) {
+    // 실시간 체결 행 생성 함수
+    function addTradeLogRow(time, price, qty, isAsk) {
       const tbody = document.getElementById('trade-log');
       const row = document.createElement('tr');
-      row.className = 'hover:bg-slate-800/40 transition-colors';
+      const totalAmount = Math.round(price * qty);
+
+      // 매수/매도 구분 CSS 및 애니메이션 클래스 지정
+      row.className = `transition-colors ${isAsk ? 'row-sell' : 'row-buy'}`;
+
       row.innerHTML = `
-        <td class="py-2 text-slate-400">${time}</td>
-        <td class="py-2 font-medium ${isAsk ? 'text-blue-400' : 'text-red-400'}">₩${price.toLocaleString()}</td>
-        <td class="py-2 text-slate-300">${qty.toFixed(4)}</td>
-        <td class="py-2 text-right font-medium ${isAsk ? 'text-blue-400' : 'text-red-400'}">${isAsk ? '매도' : '매수'}</td>
+        <td class="py-2.5 pl-2 text-slate-400 font-mono">${time}</td>
+        <td class="py-2.5 font-semibold ${isAsk ? 'text-blue-400' : 'text-red-400'}">₩${price.toLocaleString()}</td>
+        <td class="py-2.5 text-slate-200 font-mono">${qty.toFixed(4)}</td>
+        <td class="py-2.5 text-slate-300 font-mono">₩${totalAmount.toLocaleString()}</td>
+        <td class="py-2.5 pr-2 text-right font-bold ${isAsk ? 'text-blue-400' : 'text-red-400'}">
+          <span class="px-1.5 py-0.5 rounded text-[10px] ${isAsk ? 'bg-blue-500/10 border border-blue-500/30' : 'bg-red-500/10 border border-red-500/30'}">
+            ${isAsk ? '매도' : '매수'}
+          </span>
+        </td>
       `;
+
+      // 최신 체결건을 가장 위에 삽입
       tbody.insertBefore(row, tbody.firstChild);
+
+      // 설정한 최대 개수를 초과하면 이전 행 제거
       if (tbody.children.length > maxLogRows) {
         tbody.removeChild(tbody.lastChild);
       }
     }
 
-    // 환산 계산기 연동
+    // 계산기 연동
     const calcBtcInput = document.getElementById('calc-btc');
     function updateCalculator() {
       const btcVal = parseFloat(calcBtcInput.value) || 0;
@@ -306,7 +337,7 @@
     }
     calcBtcInput.addEventListener('input', updateCalculator);
 
-    // 구동 시작
+    // 실행
     fetchInitialTicker();
     connectUpbitWS();
   </script>
