@@ -42,7 +42,7 @@
         </div>
         <div>
           <h1 class="font-bold text-lg leading-tight">Upbit BTC Live Monitor</h1>
-          <p class="text-xs text-slate-400">실시간 추이 차트 & 실시간 체결 표</p>
+          <p class="text-xs text-slate-400">일봉 / 주봉 / 월봉 실시간 차트</p>
         </div>
       </div>
       <div class="flex items-center gap-3">
@@ -98,19 +98,28 @@
       </div>
     </div>
 
-    <!-- Chart Section -->
+    <!-- Chart Section with Period Selector -->
     <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
         <div>
           <h2 class="text-base font-semibold text-slate-200">실시간 추이 차트 & 이동평균선</h2>
-          <p class="text-xs text-slate-400">상승시 위로 붉은 막대, 하강시 아래로 푸른 막대 (기록 영구 보존)</p>
+          <p class="text-xs text-slate-400">붉은 막대(상승), 푸른 막대(하락), 녹색 선(MA5)</p>
         </div>
-        <div class="flex gap-4 text-xs font-mono">
-          <span class="text-red-400">■ 상승 막대</span>
-          <span class="text-blue-400">■ 하락 막대</span>
-          <span class="text-emerald-400">― 이동평균선 (MA5)</span>
+        
+        <!-- 주기 선택 버튼 (일봉 / 주봉 / 월봉) -->
+        <div class="flex items-center gap-2 bg-slate-900/80 p-1 rounded-xl border border-slate-700/60">
+          <button id="btn-days" onclick="changePeriod('days')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-slate-950 transition-colors">
+            일봉 (하루)
+          </button>
+          <button id="btn-weeks" onclick="changePeriod('weeks')" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors">
+            주봉 (일주일)
+          </button>
+          <button id="btn-months" onclick="changePeriod('months')" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors">
+            월봉 (한 달)
+          </button>
         </div>
       </div>
+      
       <div class="h-80 w-full">
         <canvas id="priceChart"></canvas>
       </div>
@@ -176,17 +185,22 @@
     let currentKrwPrice = 0;
     let highPrice = 0;
     let lowPrice = 0;
-    const maxBars = 35;       // 차트에 유지할 최대 막대 개수
-    const maxLogRows = 15;    // 표에 표시할 행 개수
-    const maPeriod = 5;       // 이동평균선(MA5) 계산 수량
+    let currentPeriod = 'days';
+    const maxLogRows = 15;
+    const maPeriod = 5;
 
-    // 차트 데이터 저장용 배열
-    const chartLabels = [];
-    const barValues = [];
-    const barColors = [];
-    const closePrices = [];   // 이동평균 계산용 실제 종가 저장 배열
+    // 웹소켓 상태 관리 변수
+    let ws = null;
+    let pingInterval = null;
+    let reconnectDelay = 1000; // 재연결 대기 시간 (초기 1초)
 
-    // Chart.js 설정 (혼합 차트: 막대 차트 + 이동평균선 라인)
+    // 차트 데이터 배열
+    let chartLabels = [];
+    let barValues = [];
+    let barColors = [];
+    let closePrices = [];
+
+    // Chart.js 설정
     const ctx = document.getElementById('priceChart').getContext('2d');
     
     const priceChart = new Chart(ctx, {
@@ -206,7 +220,7 @@
             label: '이동평균선 (MA5)',
             type: 'line',
             data: [],
-            borderColor: '#10B981', // 녹색 이동평균선
+            borderColor: '#10B981',
             borderWidth: 2,
             pointRadius: 0,
             tension: 0.2,
@@ -220,13 +234,12 @@
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
-          x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B', maxTicksLimit: 8 } },
+          x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B', maxTicksLimit: 10 } },
           y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B' } }
         }
       }
     });
 
-    // 이동평균선(MA5) 계산 및 업데이트
     function updateMaLine() {
       const maData = [];
       for (let i = 0; i < closePrices.length; i++) {
@@ -243,7 +256,62 @@
       priceChart.data.datasets[1].data = maData;
     }
 
-    // 업비트 초기 시세 로드
+    async function loadCandleData(period) {
+      try {
+        const count = 30;
+        const url = `https://api.upbit.com/v1/candles/${period}?market=KRW-BTC&count=${count}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        const sorted = data.reverse();
+
+        chartLabels = [];
+        barValues = [];
+        barColors = [];
+        closePrices = [];
+
+        sorted.forEach(c => {
+          let label = c.candle_date_time_kst.split('T')[0];
+          if (period === 'days') label = label.substring(5);
+          
+          const open = c.opening_price;
+          const close = c.trade_price;
+          const isUp = close >= open;
+
+          chartLabels.push(label);
+          barValues.push(isUp ? [open, close] : [close, open]);
+          barColors.push(isUp ? '#EF4444' : '#3B82F6');
+          closePrices.push(close);
+        });
+
+        priceChart.data.labels = chartLabels;
+        priceChart.data.datasets[0].data = barValues;
+        priceChart.data.datasets[0].backgroundColor = barColors;
+
+        updateMaLine();
+        priceChart.update();
+      } catch(e) {
+        console.error('캔들 로드 실패:', e);
+      }
+    }
+
+    function changePeriod(period) {
+      currentPeriod = period;
+
+      const btnDays = document.getElementById('btn-days');
+      const btnWeeks = document.getElementById('btn-weeks');
+      const btnMonths = document.getElementById('btn-months');
+
+      const activeClass = "px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-slate-950 transition-colors";
+      const inactiveClass = "px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors";
+
+      btnDays.className = period === 'days' ? activeClass : inactiveClass;
+      btnWeeks.className = period === 'weeks' ? activeClass : inactiveClass;
+      btnMonths.className = period === 'months' ? activeClass : inactiveClass;
+
+      loadCandleData(period);
+    }
+
     async function fetchInitialTicker() {
       try {
         const res = await fetch('https://api.upbit.com/v1/ticker?markets=KRW-BTC');
@@ -299,17 +367,35 @@
       updateCalculator();
     }
 
-    // 업비트 실시간 웹소켓 연결
+    // 보강된 업비트 웹소켓 연결 함수
     function connectUpbitWS() {
-      const ws = new WebSocket('wss://api.upbit.com/websocket/v1');
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      ws = new WebSocket('wss://api.upbit.com/websocket/v1');
 
       ws.onopen = () => {
+        // 성공 연결 시 재연결 대기 시간 초기화
+        reconnectDelay = 1000;
+
+        document.getElementById('connection-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 웹소켓 연결됨';
+        document.getElementById('connection-status').className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+
         const payload = [
           { ticket: "BTC_MONITOR" },
           { type: "ticker", codes: ["KRW-BTC"] },
           { type: "trade", codes: ["KRW-BTC"] }
         ];
         ws.send(JSON.stringify(payload));
+
+        // 30초마다 PING 타이머 작동 (연결 유지 Heartbeat)
+        if (pingInterval) clearInterval(pingInterval);
+        pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send('PING');
+          }
+        }, 30000);
       };
 
       ws.onmessage = async (event) => {
@@ -317,6 +403,8 @@
         if (event.data instanceof Blob) {
           textData = await event.data.text();
         }
+        if (textData === 'PONG') return; // PONG 수신 시 무시
+
         const data = JSON.parse(textData);
 
         if (data.type === 'ticker') {
@@ -331,50 +419,53 @@
 
           document.getElementById('last-update').textContent = `최근 체결: ${timeStr}`;
 
-          // 실시간 추이 차트 데이터 갱신
-          addChartData(timeStr, price);
+          if (closePrices.length > 0) {
+            const lastIdx = closePrices.length - 1;
+            const openPrice = Array.isArray(barValues[lastIdx]) ? barValues[lastIdx][0] : closePrices[lastIdx];
+            
+            closePrices[lastIdx] = price;
+            const isUp = price >= openPrice;
+            barValues[lastIdx] = isUp ? [openPrice, price] : [price, openPrice];
+            barColors[lastIdx] = isUp ? '#EF4444' : '#3B82F6';
 
-          // 실시간 체결 표 갱신
+            updateMaLine();
+            priceChart.update('none');
+          }
+
           addTradeLogRow(timeStr, price, qty, isAsk);
         }
       };
 
       ws.onclose = () => {
-        document.getElementById('connection-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> 연결 끊김';
+        if (pingInterval) clearInterval(pingInterval);
+        
+        document.getElementById('connection-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> 연결 끊김 (재연결 시도 중)';
         document.getElementById('connection-status').className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20';
-        setTimeout(connectUpbitWS, 3000);
+
+        // 지수 백오프 기반 재연결 시도 (최대 10초)
+        setTimeout(() => {
+          connectUpbitWS();
+        }, reconnectDelay);
+
+        reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+      };
+
+      ws.onerror = (err) => {
+        console.error('웹소켓 에러 발생:', err);
+        ws.close();
       };
     }
 
-    // 실시간 막대 차트 데이터 추가 (지나간 색상 고정 유지)
-    function addChartData(timeStr, price) {
-      const prevPrice = closePrices.length > 0 ? closePrices[closePrices.length - 1] : price;
-      
-      // [기준 1] 상승(Red) / 하락(Blue) 막대 색상 고정
-      const isUp = price >= prevPrice;
-      const color = isUp ? '#EF4444' : '#3B82F6';
-
-      // [기준 2] 상승시 붉은 막대가 위로[이전가, 현재가], 하강시 푸른 막대가 아래로[현재가, 이전가]
-      const barRange = isUp ? [prevPrice, price] : [price, prevPrice];
-
-      chartLabels.push(timeStr);
-      barValues.push(barRange);
-      barColors.push(color);
-      closePrices.push(price);
-
-      // 최대 개수 초과 시 예전 막대 삭제 (기존 막대의 색상은 배열 내에 그대로 저장 유지)
-      if (chartLabels.length > maxBars) {
-        chartLabels.shift();
-        barValues.shift();
-        barColors.shift();
-        closePrices.shift();
+    // 브라우저 탭 활성화 시 연결 상태 체크 및 자동 복구
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          fetchInitialTicker();
+          connectUpbitWS();
+        }
       }
+    });
 
-      updateMaLine();
-      priceChart.update('none');
-    }
-
-    // 실시간 체결 내역 표 행 추가
     function addTradeLogRow(time, price, qty, isAsk) {
       const tbody = document.getElementById('trade-log');
       const row = document.createElement('tr');
@@ -409,7 +500,9 @@
     }
     calcBtcInput.addEventListener('input', updateCalculator);
 
+    // 초기 실행
     fetchInitialTicker();
+    loadCandleData('days');
     connectUpbitWS();
   </script>
 </body>
