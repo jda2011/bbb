@@ -42,7 +42,7 @@
         </div>
         <div>
           <h1 class="font-bold text-lg leading-tight">Upbit BTC Live Monitor</h1>
-          <p class="text-xs text-slate-400">일봉 / 주봉 / 월봉 실시간 차트</p>
+          <p class="text-xs text-slate-400">일봉 / 주봉 / 월봉 매매 신호 모니터링</p>
         </div>
       </div>
       <div class="flex items-center gap-3">
@@ -103,7 +103,7 @@
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
         <div>
           <h2 class="text-base font-semibold text-slate-200">실시간 추이 차트 (<span id="chart-title">일봉</span>)</h2>
-          <p class="text-xs text-slate-400">상승시 붉은 막대(위로), 하락시 푸른 막대(아래로), 녹색 선(MA5)</p>
+          <p class="text-xs text-slate-400">Y축 단위 500원 기준 / 녹색 선: 이동평균선(MA5)</p>
         </div>
         
         <!-- 주기 선택 버튼 (일봉 / 주봉 / 월봉) -->
@@ -197,6 +197,7 @@
     let barValues = [];
     let barColors = [];
     let closePrices = [];
+    let openPrices = [];
 
     // Chart.js 설정
     const ctx = document.getElementById('priceChart').getContext('2d');
@@ -207,7 +208,7 @@
         labels: chartLabels,
         datasets: [
           {
-            label: '시가-정가 변동',
+            label: '시가-정가(종가) 변동',
             data: barValues,
             backgroundColor: barColors,
             borderRadius: 2,
@@ -230,13 +231,58 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                const idx = context.dataIndex;
+                if (context.dataset.type === 'line') {
+                  return `MA5: ₩${Math.round(context.raw).toLocaleString()}`;
+                }
+                const o = openPrices[idx];
+                const c = closePrices[idx];
+                const diff = c - o;
+                return [
+                  `시가: ₩${o ? o.toLocaleString() : 0}`,
+                  `정가(종가): ₩${c ? c.toLocaleString() : 0}`,
+                  `변동액: ₩${diff > 0 ? '+' : ''}${diff.toLocaleString()}`
+                ];
+              }
+            }
+          }
+        },
         scales: {
-          x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B', maxTicksLimit: 12 } },
-          y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B' } }
+          x: { 
+            grid: { color: 'rgba(255, 255, 255, 0.05)' }, 
+            ticks: { color: '#64748B', maxTicksLimit: 12 } 
+          },
+          y: { 
+            grid: { color: 'rgba(255, 255, 255, 0.05)' }, 
+            ticks: { 
+              color: '#64748B',
+              stepSize: 500, // Y축 단위 500 고정
+              callback: function(value) {
+                return '₩' + value.toLocaleString();
+              }
+            } 
+          }
         }
       }
     });
+
+    // Y축 스케일 최적화 (500 단위 눈금이 잘 드러나도록 축 범위 조정)
+    function adjustYAxisLimits() {
+      if (closePrices.length === 0) return;
+      
+      let allPrices = [...openPrices, ...closePrices].filter(p => p > 0);
+      let min = Math.min(...allPrices);
+      let max = Math.max(...allPrices);
+
+      // 500 단위로 내림/올림 정리
+      priceChart.options.scales.y.min = Math.floor((min - 1000) / 500) * 500;
+      priceChart.options.scales.y.max = Math.ceil((max + 1000) / 500) * 500;
+    }
 
     function updateMaLine() {
       const maData = [];
@@ -254,30 +300,25 @@
       priceChart.data.datasets[1].data = maData;
     }
 
-    // 주기에 따른 날짜 라벨 변환 로직
     function formatCandleLabel(dateStr, period) {
       const date = new Date(dateStr);
       if (period === 'days') {
-        // 일봉: MM-DD
         return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       } else if (period === 'weeks') {
-        // 주봉: YY-W주차
         const year = String(date.getFullYear()).slice(-2);
         const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
         const pastDaysOfYear = (date - firstDayOfYear) / 86400000;
         const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
         return `${year}-W${weekNum}`;
       } else if (period === 'months') {
-        // 월봉: YYYY-MM
         return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       }
       return dateStr;
     }
 
-    // 업비트 API를 통해 일/주/월봉 데이터 로드
     async function loadCandleData(period) {
       try {
-        const count = period === 'months' ? 24 : 30; // 월봉은 24개월, 일/주봉은 30개
+        const count = period === 'months' ? 24 : 30;
         const url = `https://api.upbit.com/v1/candles/${period}?market=KRW-BTC&count=${count}`;
         const res = await fetch(url);
         const data = await res.json();
@@ -288,16 +329,19 @@
         barValues = [];
         barColors = [];
         closePrices = [];
+        openPrices = [];
 
         sorted.forEach(c => {
           const label = formatCandleLabel(c.candle_date_time_kst, period);
-          const open = c.opening_price;   // 시가
-          const close = c.trade_price;  // 종가 (정가)
+          const open = c.opening_price;
+          const close = c.trade_price;
           const isUp = close >= open;
 
           chartLabels.push(label);
+          // 시가와 종가 범위를 막대로 전달
           barValues.push(isUp ? [open, close] : [close, open]);
           barColors.push(isUp ? '#EF4444' : '#3B82F6');
+          openPrices.push(open);
           closePrices.push(close);
         });
 
@@ -305,6 +349,7 @@
         priceChart.data.datasets[0].data = barValues;
         priceChart.data.datasets[0].backgroundColor = barColors;
 
+        adjustYAxisLimits();
         updateMaLine();
         priceChart.update();
       } catch(e) {
@@ -312,7 +357,6 @@
       }
     }
 
-    // 주기 클릭 시 상태 변경
     function changePeriod(period) {
       currentPeriod = period;
 
@@ -440,13 +484,14 @@
           // 실시간 현재 봉 종가 갱신
           if (closePrices.length > 0) {
             const lastIdx = closePrices.length - 1;
-            const openPrice = Array.isArray(barValues[lastIdx]) ? barValues[lastIdx][0] : closePrices[lastIdx];
+            const openPrice = openPrices[lastIdx];
             
             closePrices[lastIdx] = price;
             const isUp = price >= openPrice;
             barValues[lastIdx] = isUp ? [openPrice, price] : [price, openPrice];
             barColors[lastIdx] = isUp ? '#EF4444' : '#3B82F6';
 
+            adjustYAxisLimits();
             updateMaLine();
             priceChart.update('none');
           }
@@ -493,7 +538,7 @@
       row.innerHTML = `
         <td class="py-2.5 pl-2 text-slate-400 font-mono">${time}</td>
         <td class="py-2.5 font-semibold ${isAsk ? 'text-blue-400' : 'text-red-400'}">₩${price.toLocaleString()}</td>
-        <td class="py-2.5 text-slate-200 font-mono">${qty.toFixed(4)}</td>
+        <td class="py-2.5 text-slate-300 font-mono">${qty.toFixed(4)}</td>
         <td class="py-2.5 text-slate-300 font-mono">₩${totalAmount.toLocaleString()}</td>
         <td class="py-2.5 pr-2 text-right font-bold ${isAsk ? 'text-blue-400' : 'text-red-400'}">
           <span class="px-1.5 py-0.5 rounded text-[10px] ${isAsk ? 'bg-blue-500/10 border border-blue-500/30' : 'bg-red-500/10 border border-red-500/30'}">
