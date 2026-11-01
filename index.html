@@ -42,12 +42,12 @@
         </div>
         <div>
           <h1 class="font-bold text-lg leading-tight">Upbit BTC Live Monitor</h1>
-          <p class="text-xs text-slate-400">실시간 체결가 추이 차트 & 체결 표</p>
+          <p class="text-xs text-slate-400">실시간 추이 차트 & 실시간 체결 표</p>
         </div>
       </div>
       <div class="flex items-center gap-3">
         <span id="connection-status" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 웹소켓 수신 중
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 웹소켓 연결됨
         </span>
       </div>
     </div>
@@ -90,7 +90,6 @@
           </div>
         </div>
 
-        <!-- High/Low Gauge Bar -->
         <div class="space-y-1">
           <div class="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden flex relative border border-slate-700/50">
             <div id="range-bar" class="bg-gradient-to-r from-blue-500 via-amber-500 to-red-500 h-full transition-all duration-300" style="width: 0%"></div>
@@ -99,19 +98,20 @@
       </div>
     </div>
 
-    <!-- Real-time Price Line Chart Section -->
+    <!-- Chart Section -->
     <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
         <div>
-          <h2 class="text-base font-semibold text-slate-200">실시간 체결가 추이 차트</h2>
-          <p class="text-xs text-slate-400">붉은색(상승) / 푸른색(하락) 실시간 변동, 녹색(이동평균선)</p>
+          <h2 class="text-base font-semibold text-slate-200">실시간 추이 차트 & 이동평균선</h2>
+          <p class="text-xs text-slate-400">상승시 위로 붉은 막대, 하강시 아래로 푸른 막대 (기록 영구 보존)</p>
         </div>
         <div class="flex gap-4 text-xs font-mono">
-          <span class="text-red-400">― 실시간 가격 (상승: 붉은색 / 하락: 푸른색)</span>
+          <span class="text-red-400">■ 상승 막대</span>
+          <span class="text-blue-400">■ 하락 막대</span>
           <span class="text-emerald-400">― 이동평균선 (MA5)</span>
         </div>
       </div>
-      <div class="h-72 w-full">
+      <div class="h-80 w-full">
         <canvas id="priceChart"></canvas>
       </div>
     </div>
@@ -136,7 +136,6 @@
               </tr>
             </thead>
             <tbody id="trade-log" class="divide-y divide-slate-800/60">
-              <!-- 실시간 체결 데이터 추가 영역 -->
             </tbody>
           </table>
         </div>
@@ -177,36 +176,42 @@
     let currentKrwPrice = 0;
     let highPrice = 0;
     let lowPrice = 0;
-    const maxDataPoints = 35; // 차트에 표시할 데이터 개수
-    const maxLogRows = 15;    // 표에 표시할 실시간 행 개수
-    const maPeriod = 5;       // 이동평균 계산 수량
+    const maxBars = 35;       // 차트에 유지할 최대 막대 개수
+    const maxLogRows = 15;    // 표에 표시할 행 개수
+    const maPeriod = 5;       // 이동평균선(MA5) 계산 수량
 
-    // Chart.js 라인 차트 초기화
+    // 차트 데이터 저장용 배열
+    const chartLabels = [];
+    const barValues = [];
+    const barColors = [];
+    const closePrices = [];   // 이동평균 계산용 실제 종가 저장 배열
+
+    // Chart.js 설정 (혼합 차트: 막대 차트 + 이동평균선 라인)
     const ctx = document.getElementById('priceChart').getContext('2d');
     
     const priceChart = new Chart(ctx, {
-      type: 'line',
+      type: 'bar',
       data: {
-        labels: [],
+        labels: chartLabels,
         datasets: [
           {
-            label: '실시간 체결가',
-            data: [],
-            borderColor: '#EF4444', // 기본 붉은색
-            borderWidth: 2,
-            tension: 0.2,
-            pointRadius: 0,
-            fill: false
+            label: '변동 추이',
+            data: barValues,
+            backgroundColor: barColors,
+            borderRadius: 2,
+            borderSkipped: false,
+            order: 2
           },
           {
             label: '이동평균선 (MA5)',
+            type: 'line',
             data: [],
             borderColor: '#10B981', // 녹색 이동평균선
             borderWidth: 2,
-            tension: 0.3,
             pointRadius: 0,
-            borderDash: [4, 4],     // 점선 형태
-            fill: false
+            tension: 0.2,
+            fill: false,
+            order: 1
           }
         ]
       },
@@ -215,24 +220,22 @@
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
-          x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B', maxTicksLimit: 7 } },
+          x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B', maxTicksLimit: 8 } },
           y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B' } }
         }
       }
     });
 
-    // 이동평균선 계산
+    // 이동평균선(MA5) 계산 및 업데이트
     function updateMaLine() {
-      const prices = priceChart.data.datasets[0].data;
       const maData = [];
-
-      for (let i = 0; i < prices.length; i++) {
+      for (let i = 0; i < closePrices.length; i++) {
         if (i < maPeriod - 1) {
           maData.push(null);
         } else {
           let sum = 0;
           for (let j = 0; j < maPeriod; j++) {
-            sum += prices[i - j];
+            sum += closePrices[i - j];
           }
           maData.push(sum / maPeriod);
         }
@@ -240,7 +243,7 @@
       priceChart.data.datasets[1].data = maData;
     }
 
-    // 초기 24시간 정보 로드
+    // 업비트 초기 시세 로드
     async function fetchInitialTicker() {
       try {
         const res = await fetch('https://api.upbit.com/v1/ticker?markets=KRW-BTC');
@@ -249,7 +252,7 @@
           updateTickerUI(data[0]);
         }
       } catch(e) {
-        console.error('초기 로드 실패:', e);
+        console.error('초기 데이터 로드 실패:', e);
       }
     }
 
@@ -296,7 +299,7 @@
       updateCalculator();
     }
 
-    // 업비트 실시간 웹소켓 연동
+    // 업비트 실시간 웹소켓 연결
     function connectUpbitWS() {
       const ws = new WebSocket('wss://api.upbit.com/websocket/v1');
 
@@ -320,7 +323,6 @@
           updateTickerUI(data);
         }
 
-        // 실시간 체결 수신 시 차트 및 표 갱신
         if (data.type === 'trade') {
           const price = data.trade_price;
           const qty = data.trade_volume;
@@ -329,27 +331,10 @@
 
           document.getElementById('last-update').textContent = `최근 체결: ${timeStr}`;
 
-          // 1. 실시간 차트 업데이트
-          const labels = priceChart.data.labels;
-          const dataPoints = priceChart.data.datasets[0].data;
+          // 실시간 추이 차트 데이터 갱신
+          addChartData(timeStr, price);
 
-          const prevPrice = dataPoints.length > 0 ? dataPoints[dataPoints.length - 1] : price;
-          
-          labels.push(timeStr);
-          dataPoints.push(price);
-
-          if (labels.length > maxDataPoints) {
-            labels.shift();
-            dataPoints.shift();
-          }
-
-          // 상승 시 붉은색 선, 하락 시 푸른색 선으로 동적 변경
-          priceChart.data.datasets[0].borderColor = price >= prevPrice ? '#EF4444' : '#3B82F6';
-
-          updateMaLine();
-          priceChart.update('none');
-
-          // 2. 실시간 체결 내역 표 행 추가
+          // 실시간 체결 표 갱신
           addTradeLogRow(timeStr, price, qty, isAsk);
         }
       };
@@ -361,7 +346,35 @@
       };
     }
 
-    // 실시간 표 행 추가 함수
+    // 실시간 막대 차트 데이터 추가 (지나간 색상 고정 유지)
+    function addChartData(timeStr, price) {
+      const prevPrice = closePrices.length > 0 ? closePrices[closePrices.length - 1] : price;
+      
+      // [기준 1] 상승(Red) / 하락(Blue) 막대 색상 고정
+      const isUp = price >= prevPrice;
+      const color = isUp ? '#EF4444' : '#3B82F6';
+
+      // [기준 2] 상승시 붉은 막대가 위로[이전가, 현재가], 하강시 푸른 막대가 아래로[현재가, 이전가]
+      const barRange = isUp ? [prevPrice, price] : [price, prevPrice];
+
+      chartLabels.push(timeStr);
+      barValues.push(barRange);
+      barColors.push(color);
+      closePrices.push(price);
+
+      // 최대 개수 초과 시 예전 막대 삭제 (기존 막대의 색상은 배열 내에 그대로 저장 유지)
+      if (chartLabels.length > maxBars) {
+        chartLabels.shift();
+        barValues.shift();
+        barColors.shift();
+        closePrices.shift();
+      }
+
+      updateMaLine();
+      priceChart.update('none');
+    }
+
+    // 실시간 체결 내역 표 행 추가
     function addTradeLogRow(time, price, qty, isAsk) {
       const tbody = document.getElementById('trade-log');
       const row = document.createElement('tr');
