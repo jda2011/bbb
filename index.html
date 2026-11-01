@@ -6,16 +6,14 @@
   <title>업비트 실시간 비트코인 모니터</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Chart.js 및 Financial 차트 플러그인 CDN -->
+  <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.0/dist/chartjs-chart-financial.min.js"></script>
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap');
     body { font-family: 'Pretendard', sans-serif; }
     
+    /* 실시간 체결 행 추가 애니메이션 */
     @keyframes newRowBuy {
       0% { background-color: rgba(239, 68, 68, 0.25); }
       100% { background-color: transparent; }
@@ -27,6 +25,7 @@
     .row-buy { animation: newRowBuy 0.8s ease-out; }
     .row-sell { animation: newRowSell 0.8s ease-out; }
 
+    /* 현재가 반짝임 애니메이션 */
     .price-up { color: #EF4444; animation: flashRed 0.5s ease-out; }
     .price-down { color: #3B82F6; animation: flashBlue 0.5s ease-out; }
     @keyframes flashRed { 0% { background-color: rgba(239, 68, 68, 0.2); } 100% { background-color: transparent; } }
@@ -43,12 +42,12 @@
         </div>
         <div>
           <h1 class="font-bold text-lg leading-tight">Upbit BTC Live Monitor</h1>
-          <p class="text-xs text-slate-400">실시간 체결 내역 표 & 캔들 차트</p>
+          <p class="text-xs text-slate-400">실시간 체결가 추이 차트 & 체결 표</p>
         </div>
       </div>
       <div class="flex items-center gap-3">
         <span id="connection-status" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 웹소켓 연결됨
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 웹소켓 수신 중
         </span>
       </div>
     </div>
@@ -100,20 +99,19 @@
       </div>
     </div>
 
-    <!-- Chart Section -->
+    <!-- Real-time Price Line Chart Section -->
     <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5">
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
         <div>
-          <h2 class="text-base font-semibold text-slate-200">실시간 캔들 차트 & 이동평균선</h2>
-          <p class="text-xs text-slate-400">붉은색(상승) / 푸른색(하락) 캔들, 녹색 선(이동평균선)</p>
+          <h2 class="text-base font-semibold text-slate-200">실시간 체결가 추이 차트</h2>
+          <p class="text-xs text-slate-400">붉은색(상승) / 푸른색(하락) 실시간 변동, 녹색(이동평균선)</p>
         </div>
         <div class="flex gap-4 text-xs font-mono">
-          <span class="text-red-400">■ 상승 캔들</span>
-          <span class="text-blue-400">■ 하락 캔들</span>
+          <span class="text-red-400">― 실시간 가격 (상승: 붉은색 / 하락: 푸른색)</span>
           <span class="text-emerald-400">― 이동평균선 (MA5)</span>
         </div>
       </div>
-      <div class="h-80 w-full">
+      <div class="h-72 w-full">
         <canvas id="priceChart"></canvas>
       </div>
     </div>
@@ -138,7 +136,7 @@
               </tr>
             </thead>
             <tbody id="trade-log" class="divide-y divide-slate-800/60">
-              <!-- 웹소켓으로 수신된 실시간 체결 정보가 여기에 행(Row) 단위로 추가됩니다 -->
+              <!-- 실시간 체결 데이터 추가 영역 -->
             </tbody>
           </table>
         </div>
@@ -179,41 +177,35 @@
     let currentKrwPrice = 0;
     let highPrice = 0;
     let lowPrice = 0;
-    const maxCandles = 30;
-    const maxLogRows = 15;
-    const maPeriod = 5;
+    const maxDataPoints = 35; // 차트에 표시할 데이터 개수
+    const maxLogRows = 15;    // 표에 표시할 실시간 행 개수
+    const maPeriod = 5;       // 이동평균 계산 수량
 
-    let candleData = [];
-
-    // Chart.js 설정
+    // Chart.js 라인 차트 초기화
     const ctx = document.getElementById('priceChart').getContext('2d');
-
+    
     const priceChart = new Chart(ctx, {
-      type: 'candlestick',
+      type: 'line',
       data: {
+        labels: [],
         datasets: [
           {
-            label: 'BTC/KRW 캔들',
-            data: candleData,
-            color: {
-              up: '#EF4444',       // 상승(붉은색)
-              down: '#3B82F6',     // 하락(푸른색)
-              unchanged: '#94A3B8'
-            },
-            borderColor: {
-              up: '#EF4444',
-              down: '#3B82F6',
-              unchanged: '#94A3B8'
-            }
+            label: '실시간 체결가',
+            data: [],
+            borderColor: '#EF4444', // 기본 붉은색
+            borderWidth: 2,
+            tension: 0.2,
+            pointRadius: 0,
+            fill: false
           },
           {
             label: '이동평균선 (MA5)',
-            type: 'line',
             data: [],
-            borderColor: '#10B981', // 녹색 선
+            borderColor: '#10B981', // 녹색 이동평균선
             borderWidth: 2,
+            tension: 0.3,
             pointRadius: 0,
-            tension: 0.2,
+            borderDash: [4, 4],     // 점선 형태
             fill: false
           }
         ]
@@ -223,59 +215,32 @@
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
-          x: {
-            type: 'time',
-            time: { unit: 'second' },
-            grid: { color: 'rgba(255, 255, 255, 0.05)' },
-            ticks: { color: '#64748B' }
-          },
-          y: {
-            grid: { color: 'rgba(255, 255, 255, 0.05)' },
-            ticks: { color: '#64748B' }
-          }
+          x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B', maxTicksLimit: 7 } },
+          y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748B' } }
         }
       }
     });
 
-    async function fetchInitialCandles() {
-      try {
-        const res = await fetch('https://api.upbit.com/v1/candles/minutes/1?market=KRW-BTC&count=25');
-        const data = await res.json();
-        
-        const sorted = data.reverse();
-        sorted.forEach(c => {
-          candleData.push({
-            x: new Date(c.candle_date_time_kst).getTime(),
-            o: c.opening_price,
-            h: c.high_price,
-            l: c.low_price,
-            c: c.trade_price
-          });
-        });
-
-        updateMaLine();
-        priceChart.update();
-      } catch(e) {
-        console.error('캔들 초기 데이터 로드 실패:', e);
-      }
-    }
-
+    // 이동평균선 계산
     function updateMaLine() {
+      const prices = priceChart.data.datasets[0].data;
       const maData = [];
-      for (let i = 0; i < candleData.length; i++) {
+
+      for (let i = 0; i < prices.length; i++) {
         if (i < maPeriod - 1) {
-          maData.push({ x: candleData[i].x, y: null });
+          maData.push(null);
         } else {
           let sum = 0;
           for (let j = 0; j < maPeriod; j++) {
-            sum += candleData[i - j].c;
+            sum += prices[i - j];
           }
-          maData.push({ x: candleData[i].x, y: sum / maPeriod });
+          maData.push(sum / maPeriod);
         }
       }
       priceChart.data.datasets[1].data = maData;
     }
 
+    // 초기 24시간 정보 로드
     async function fetchInitialTicker() {
       try {
         const res = await fetch('https://api.upbit.com/v1/ticker?markets=KRW-BTC');
@@ -331,6 +296,7 @@
       updateCalculator();
     }
 
+    // 업비트 실시간 웹소켓 연동
     function connectUpbitWS() {
       const ws = new WebSocket('wss://api.upbit.com/websocket/v1');
 
@@ -354,16 +320,36 @@
           updateTickerUI(data);
         }
 
+        // 실시간 체결 수신 시 차트 및 표 갱신
         if (data.type === 'trade') {
           const price = data.trade_price;
           const qty = data.trade_volume;
           const isAsk = data.ask_bid === 'ASK';
-          const timestamp = data.trade_timestamp || Date.now();
           const timeStr = data.trade_time_str || new Date().toLocaleTimeString();
 
           document.getElementById('last-update').textContent = `최근 체결: ${timeStr}`;
 
-          updateCandleData(timestamp, price);
+          // 1. 실시간 차트 업데이트
+          const labels = priceChart.data.labels;
+          const dataPoints = priceChart.data.datasets[0].data;
+
+          const prevPrice = dataPoints.length > 0 ? dataPoints[dataPoints.length - 1] : price;
+          
+          labels.push(timeStr);
+          dataPoints.push(price);
+
+          if (labels.length > maxDataPoints) {
+            labels.shift();
+            dataPoints.shift();
+          }
+
+          // 상승 시 붉은색 선, 하락 시 푸른색 선으로 동적 변경
+          priceChart.data.datasets[0].borderColor = price >= prevPrice ? '#EF4444' : '#3B82F6';
+
+          updateMaLine();
+          priceChart.update('none');
+
+          // 2. 실시간 체결 내역 표 행 추가
           addTradeLogRow(timeStr, price, qty, isAsk);
         }
       };
@@ -375,34 +361,7 @@
       };
     }
 
-    function updateCandleData(timestamp, price) {
-      if (candleData.length === 0) return;
-
-      const lastCandle = candleData[candleData.length - 1];
-      const isNewMinute = (timestamp - lastCandle.x) >= 60000;
-
-      if (isNewMinute) {
-        candleData.push({
-          x: timestamp,
-          o: price,
-          h: price,
-          l: price,
-          c: price
-        });
-        if (candleData.length > maxCandles) {
-          candleData.shift();
-        }
-      } else {
-        lastCandle.h = Math.max(lastCandle.h, price);
-        lastCandle.l = Math.min(lastCandle.l, price);
-        lastCandle.c = price;
-      }
-
-      updateMaLine();
-      priceChart.update('none');
-    }
-
-    // 실시간 체결 내역 표 행(Row) 추가 함수
+    // 실시간 표 행 추가 함수
     function addTradeLogRow(time, price, qty, isAsk) {
       const tbody = document.getElementById('trade-log');
       const row = document.createElement('tr');
@@ -438,7 +397,6 @@
     calcBtcInput.addEventListener('input', updateCalculator);
 
     fetchInitialTicker();
-    fetchInitialCandles();
     connectUpbitWS();
   </script>
 </body>
