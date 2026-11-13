@@ -6,9 +6,9 @@
   <title>비트코인 실시간 시세 & Web3 스왑</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Lightweight Charts (TradingView 스타일 고성능 캔들 차트) -->
+  <!-- Lightweight Charts -->
   <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
-  <!-- Ethers.js (블록체인 지갑 연동 라이브러리) -->
+  <!-- Ethers.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.11.1/ethers.umd.min.js"></script>
 
   <style>
@@ -38,14 +38,13 @@
         <span id="ws-status" class="flex items-center gap-1.5 text-xs text-emerald-400">
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 실시간 연결됨
         </span>
-        <!-- 블록체인 지갑 연결 버튼 -->
         <button id="connect-wallet-btn" onclick="connectWallet()" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-colors">
           🦊 지갑 연결 (Web3)
         </button>
       </div>
     </header>
 
-    <!-- 1. Main Price Overview Card (이미지 상단 영역) -->
+    <!-- 1. Main Price Overview Card -->
     <section class="card-bg rounded-2xl p-6">
       <div class="text-xs text-slate-400 mb-1">BTC / KRW · 업비트</div>
       <div class="flex items-baseline gap-3">
@@ -73,9 +72,8 @@
       </div>
     </section>
 
-    <!-- 2. Candlestick Chart Card (이미지 중단 영역) -->
+    <!-- 2. Candlestick Chart Card -->
     <section class="card-bg rounded-2xl p-5">
-      <!-- Timeframe Buttons & MA Checkboxes -->
       <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
         <div id="timeframe-buttons" class="flex flex-wrap gap-1.5 text-xs">
           <button data-type="minutes" data-unit="1" class="tf-btn px-3 py-1.5 rounded-full bg-slate-100 text-slate-900 font-bold">1분</button>
@@ -89,6 +87,7 @@
         </div>
 
         <div class="flex items-center gap-4 text-xs">
+          <span id="chart-loading" class="hidden text-amber-400 animate-pulse font-medium">불러오는 중...</span>
           <label class="flex items-center gap-1.5 cursor-pointer text-amber-400">
             <input type="checkbox" id="chk-ma5" checked class="accent-blue-500 rounded"> — MA5
           </label>
@@ -108,7 +107,7 @@
     <!-- 3. Bottom Grid: 코인 목록 + 블록체인 환전(2% 수수료) 모듈 -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
       
-      <!-- 주요 코인 리스트 (이미지 하단 영역) -->
+      <!-- 주요 코인 리스트 -->
       <section class="lg:col-span-2 card-bg rounded-2xl p-5">
         <div class="overflow-x-auto">
           <table class="w-full text-left text-xs">
@@ -121,7 +120,6 @@
               </tr>
             </thead>
             <tbody id="coin-list-body" class="divide-y divide-slate-800/60 text-sm">
-              <!-- 코인 리스트 동적 렌더링 -->
             </tbody>
           </table>
         </div>
@@ -161,7 +159,6 @@
               </div>
             </div>
 
-            <!-- 누적 수수료 수익 현황 (관리자 확인용) -->
             <div class="p-2.5 rounded-lg bg-blue-950/30 border border-blue-900/50 flex justify-between items-center">
               <span class="text-blue-300">누적 수수료 수익 (2%):</span>
               <span id="accumulated-fee" class="font-bold text-blue-400">₩0</span>
@@ -184,13 +181,12 @@
 
   <script>
     // ==========================================
-    // 1. 상태 관리 및 주요 코인 목록 설정
+    // 1. 상태 관리 및 캐싱 설정
     // ==========================================
     let currentBtcPrice = 0;
     let accumulatedFeeKrw = 0;
     let userWalletAddress = null;
 
-    // 관리자 수취용 블록체인 지갑 주소 (본인의 EVM 지갑 주소로 변경 가능)
     const ADMIN_TREASURY_WALLET = "0x000000000000000000000000000000000000dEaD";
 
     const WATCH_COINS = [
@@ -203,6 +199,8 @@
 
     let currentTf = { type: 'minutes', unit: 1 };
     let rawCandles = [];
+    const candleCache = new Map(); // 시간봉 데이터 캐시
+    let fetchAbortController = null; // 중복 요청 취소용
 
     // ==========================================
     // 2. TradingView 스타일 캔들 차트 초기화
@@ -230,7 +228,6 @@
       },
     });
 
-    // 업비트 컬러 적용: 상승(빨강 #f6465d), 하락(파랑 #2b83f6)
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#f6465d',
       downColor: '#2b83f6',
@@ -239,45 +236,97 @@
       wickDownColor: '#2b83f6',
     });
 
-    const ma5Series = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1.5, priceLineVisible: false });
-    const ma20Series = chart.addLineSeries({ color: '#10b981', lineWidth: 1.5, priceLineVisible: false });
-    const ma60Series = chart.addLineSeries({ color: '#a855f7', lineWidth: 1.5, priceLineVisible: false });
+    // 끊김 없는 부드러운 이동평균선 설정
+    const ma5Series = chart.addLineSeries({
+      color: '#f59e0b',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false
+    });
+    const ma20Series = chart.addLineSeries({
+      color: '#10b981',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false
+    });
+    const ma60Series = chart.addLineSeries({
+      color: '#a855f7',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false
+    });
 
-    // 반응형 리사이징
     window.addEventListener('resize', () => {
       chart.applyOptions({ width: chartContainer.clientWidth });
     });
 
-    // 이동평균(MA) 계산 함수
+    // [수정됨] 선이 중간에 끊기지 않고 처음부터 끝까지 자연스럽게 이어지는 MA 계산 함수
     function calculateMA(data, period) {
+      if (!data || data.length === 0) return [];
       const result = [];
+      let runningSum = 0;
+
       for (let i = 0; i < data.length; i++) {
-        if (i < period - 1) continue;
-        let sum = 0;
-        for (let j = 0; j < period; j++) {
-          sum += data[i - j].close;
+        runningSum += data[i].close;
+        if (i >= period) {
+          runningSum -= data[i - period].close;
+          result.push({ time: data[i].time, value: runningSum / period });
+        } else {
+          // 초기 구간에서도 선이 끊기지 않고 자연스럽게 시작되도록 가용 캔들 수만큼 평균 산출
+          result.push({ time: data[i].time, value: runningSum / (i + 1) });
         }
-        result.push({ time: data[i].time, value: sum / period });
       }
       return result;
     }
 
-    // 업비트 캔들 데이터 불러오기
-    async function loadChartCandles(type, unit) {
-      try {
-        const endpoint = type === 'minutes'
-          ? `https://api.upbit.com/v1/candles/minutes/${unit}?market=KRW-BTC&count=120`
-          : `https://api.upbit.com/v1/candles/${type}?market=KRW-BTC&count=120`;
+    function applyChartData(candles) {
+      rawCandles = candles;
+      candleSeries.setData(rawCandles);
+      updateAllMAs();
+      // 최근 80개 봉이 화면에 가장 보기 좋게 꽉 차도록 자동 스크롤 조정
+      if (rawCandles.length > 0) {
+        const total = rawCandles.length;
+        chart.timeScale().setVisibleLogicalRange({
+          from: Math.max(0, total - 80),
+          to: total + 2
+        });
+      }
+    }
 
-        const res = await fetch(endpoint);
+    // [수정됨] 캐시 적용 및 빠른 전환을 지원하는 캔들 로더
+    async function loadChartCandles(type, unit) {
+      const cacheKey = `${type}_${unit}`;
+      const loadingEl = document.getElementById('chart-loading');
+
+      // 1. 이미 불러온 캐시 데이터가 있다면 0.01초 만에 즉시 렌더링
+      if (candleCache.has(cacheKey)) {
+        applyChartData(candleCache.get(cacheKey));
+      }
+
+      // 2. 이전 API 요청이 진행 중이면 즉시 취소하여 병목 방지
+      if (fetchAbortController) {
+        fetchAbortController.abort();
+      }
+      fetchAbortController = new AbortController();
+
+      loadingEl.classList.remove('hidden');
+
+      try {
+        // MA60이 완벽히 계산되도록 최대 200개 캔들 로드
+        const endpoint = type === 'minutes'
+          ? `https://api.upbit.com/v1/candles/minutes/${unit}?market=KRW-BTC&count=200`
+          : `https://api.upbit.com/v1/candles/${type}?market=KRW-BTC&count=200`;
+
+        const res = await fetch(endpoint, { signal: fetchAbortController.signal });
         const data = await res.json();
 
-        // 시간순 정렬 및 중복 타임스탬프 제거
         const sorted = data.reverse();
         const uniqueMap = new Map();
 
         sorted.forEach(c => {
-          // KST 보정 (+9시간)
           const unixTime = Math.floor(new Date(c.candle_date_time_kst + '+09:00').getTime() / 1000) + 32400;
           uniqueMap.set(unixTime, {
             time: unixTime,
@@ -288,11 +337,15 @@
           });
         });
 
-        rawCandles = Array.from(uniqueMap.values());
-        candleSeries.setData(rawCandles);
-        updateAllMAs();
+        const parsedCandles = Array.from(uniqueMap.values());
+        candleCache.set(cacheKey, parsedCandles); // 캐시에 최신 데이터 저장
+        applyChartData(parsedCandles);
       } catch (err) {
-        console.error('캔들 데이터 로드 실패:', err);
+        if (err.name !== 'AbortError') {
+          console.error('캔들 데이터 로드 실패:', err);
+        }
+      } finally {
+        loadingEl.classList.add('hidden');
       }
     }
 
@@ -302,18 +355,36 @@
       ma60Series.setData(document.getElementById('chk-ma60').checked ? calculateMA(rawCandles, 60) : []);
     }
 
-    // MA 체크박스 이벤트
+    // 마지막 봉 실시간 업데이트 시 MA 선도 함께 부드럽게 갱신
+    function updateLastCandleMA() {
+      if (rawCandles.length === 0) return;
+      const lastIdx = rawCandles.length - 1;
+      const lastTime = rawCandles[lastIdx].time;
+
+      const calcSinglePoint = (period) => {
+        const count = Math.min(period, rawCandles.length);
+        let sum = 0;
+        for (let i = 0; i < count; i++) {
+          sum += rawCandles[lastIdx - i].close;
+        }
+        return { time: lastTime, value: sum / count };
+      };
+
+      if (document.getElementById('chk-ma5').checked) ma5Series.update(calcSinglePoint(5));
+      if (document.getElementById('chk-ma20').checked) ma20Series.update(calcSinglePoint(20));
+      if (document.getElementById('chk-ma60').checked) ma60Series.update(calcSinglePoint(60));
+    }
+
     ['chk-ma5', 'chk-ma20', 'chk-ma60'].forEach(id => {
       document.getElementById(id).addEventListener('change', updateAllMAs);
     });
 
-    // 시간봉 버튼 전환 이벤트
     document.querySelectorAll('.tf-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         document.querySelectorAll('.tf-btn').forEach(b => {
-          b.className = 'tf-btn px-3 py-1.5 rounded-full bg-slate-800/80 text-slate-400 hover:text-white';
+          b.className = 'tf-btn px-3 py-1.5 rounded-full bg-slate-800/80 text-slate-400 hover:text-white transition-colors';
         });
-        e.target.className = 'tf-btn px-3 py-1.5 rounded-full bg-slate-100 text-slate-900 font-bold';
+        e.target.className = 'tf-btn px-3 py-1.5 rounded-full bg-slate-100 text-slate-900 font-bold transition-colors';
 
         const type = e.target.getAttribute('data-type');
         const unit = parseInt(e.target.getAttribute('data-unit'));
@@ -400,15 +471,26 @@
 
     // 업비트 WebSocket 연결 (끊김 방지 하트비트 포함)
     let ws = null;
+    let pingTimer = null;
+
     function connectWebSocket() {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
       ws = new WebSocket('wss://api.upbit.com/websocket/v1');
 
       ws.onopen = () => {
+        document.getElementById('ws-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 실시간 연결됨';
+        document.getElementById('ws-status').className = 'flex items-center gap-1.5 text-xs text-emerald-400';
+
         const codes = WATCH_COINS.map(c => c.market);
         ws.send(JSON.stringify([
           { ticket: 'BTC_DASHBOARD' },
           { type: 'ticker', codes }
         ]));
+
+        if (pingTimer) clearInterval(pingTimer);
+        pingTimer = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) ws.send('PING');
+        }, 30000);
       };
 
       ws.onmessage = async (event) => {
@@ -423,19 +505,22 @@
           if (data.code === 'KRW-BTC') {
             updateMainBtcCard(data);
 
-            // 차트 마지막 봉 실시간 갱신
             if (rawCandles.length > 0) {
               const lastCandle = rawCandles[rawCandles.length - 1];
               lastCandle.close = data.trade_price;
               lastCandle.high = Math.max(lastCandle.high, data.trade_price);
               lastCandle.low = Math.min(lastCandle.low, data.trade_price);
               candleSeries.update(lastCandle);
+              updateLastCandleMA(); // MA 선도 실시간 부드럽게 업데이트
             }
           }
         }
       };
 
       ws.onclose = () => {
+        if (pingTimer) clearInterval(pingTimer);
+        document.getElementById('ws-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-400"></span> 재연결 중...';
+        document.getElementById('ws-status').className = 'flex items-center gap-1.5 text-xs text-amber-400';
         setTimeout(connectWebSocket, 2000);
       };
     }
@@ -466,7 +551,7 @@
     const swapInput = document.getElementById('swap-krw-input');
     function updateSwapCalculation() {
       const amount = parseFloat(swapInput.value) || 0;
-      const feeRate = 0.02; // 2% 수수료율
+      const feeRate = 0.02;
       const feeKrw = Math.round(amount * feeRate);
       const netKrw = amount - feeKrw;
       const receiveBtc = currentBtcPrice > 0 ? (netKrw / currentBtcPrice) : 0;
@@ -489,7 +574,6 @@
       const netKrw = amount - feeKrw;
       const receiveBtc = (netKrw / currentBtcPrice).toFixed(8);
 
-      // 지갑이 연결된 경우 전자서명(메시지 서명)으로 온체인 트랜잭션 승인 흐름 체험
       if (userWalletAddress && window.ethereum) {
         try {
           const provider = new ethers.BrowserProvider(window.ethereum);
